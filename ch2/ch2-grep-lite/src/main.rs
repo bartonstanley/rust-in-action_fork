@@ -1,4 +1,5 @@
 use std::fs;
+use std::io;
 
 use regex::Regex;
 use clap::{Command, Arg};
@@ -16,7 +17,7 @@ impl ContextAndTags {
     }
 }
 
-fn get_args() -> Result<(String, String), String> {
+fn get_args() -> Result<(Regex, String), String> {
     let args = Command::new("grep-lite")
         .version("0.1")
         .about("searches for patterns")
@@ -32,13 +33,14 @@ fn get_args() -> Result<(String, String), String> {
     if pattern.is_none() {
         return Err(String::from("pattern argument missing"));
     }
+    let regex = Regex::new(&pattern.unwrap()).unwrap();
 
     let file_name = args.get_one::<String>("file_name");
     if file_name.is_none() {
         return Err(String::from("file_name argument missing"));
     }
 
-    return Ok((String::from(pattern.unwrap()), String::from(file_name.unwrap())));
+    Ok((regex, String::from(file_name.unwrap())))
 }
 
 fn get_context_and_matching_lines(file_contents: &str, regex: Regex) -> ContextAndTags {
@@ -82,30 +84,30 @@ fn display_results(contexts: &Vec<Vec<(usize, String)>>) {
     }
 }
 
-fn main() {
-    let result = get_args();
-    if result.is_err() {
-        eprintln!("error parsing command line arguments: {}", result.unwrap_err());
-        return;
-    }
+fn get_file_contents(file_name: &str) -> Result<String, String> {
+    let result = if file_name == "-" {
+        io::read_to_string(io::stdin())
+    } else {
+        fs::read_to_string(file_name)
+    };
 
-    let (pattern, file_name) = result.unwrap();
-
-    let regex = Regex::new(&pattern).unwrap();
-    let file_contents = fs::read_to_string(file_name);
-    if file_contents.is_err() {
-        eprintln!("error reading file: {}", file_contents.unwrap_err());
-        return;
+    match result {
+        Ok(file) => Ok(file),
+        Err(error) => Err(format!("Problem opening the file: {error:?}")),
     }
-    let file_contents = file_contents.unwrap();
+}
+
+fn main() -> Result<(), String> {
+    let (regex, file_name) = get_args()?;
+
+    let file_contents = get_file_contents(&file_name)?;
 
     let mut context_and_tags = get_context_and_matching_lines(&file_contents, regex);
 
-    if context_and_tags.tags.is_empty() {
-        return;
+    if !context_and_tags.tags.is_empty() {
+        populate_context(&file_contents, &mut context_and_tags);
+        display_results(&context_and_tags.context);
     }
-
-    populate_context(&file_contents, &mut context_and_tags);
-
-    display_results(&context_and_tags.context);
+    
+    Ok(())
 }
